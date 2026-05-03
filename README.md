@@ -7,7 +7,7 @@ The Helm chart allows flexible deployment by controlling configuration through v
 
 Deployment
 Install the chart:
-helm install flask-monitor .
+helm install flask-monitor.
 
 Verify the deployment:
 kubectl get pods
