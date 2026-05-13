@@ -4,7 +4,7 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}-ingress
   labels:
-    app: flask-monitor
+    app: {{ .Release.Name }}
 spec:
   rules:
     - host: {{ .Values.ingress.host }}
