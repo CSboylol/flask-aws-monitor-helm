@@ -32,13 +32,16 @@ podTemplate(
             }
         }
 
-        stage('Hello') {
+        stage('Build') {
             container('docker') {
+                echo "Building docker image: ${appimage}"
+                sh "docker build -t ${appimage} ."
+            }
+        }
 
-                echo "Building docker image..."
-
-                sh "echo docker build -t ${appimage} ."
-
+        stage('Push Simulation') {
+            container('docker') {
+                echo "Simulating docker push..."
                 sh "echo docker push ${appimage}"
             }
         }
