@@ -1,12 +1,16 @@
 def appname = "hello-newapp"
 def repo = "elevy99927"
 def apptag = "${env.BUILD_NUMBER}"
+
 def appimage = "docker.io/${repo}/${appname}:${apptag}"
 
 podTemplate(
     cloud: 'kubernetes',
     containers: [
-        containerTemplate(name: 'jnlp', image: 'jenkins/inbound-agent:latest'),
+        containerTemplate(
+            name: 'jnlp',
+            image: 'jenkins/inbound-agent:latest'
+        ),
         containerTemplate(
             name: 'docker',
             image: 'docker:26-dind',
@@ -23,14 +27,19 @@ podTemplate(
 
         stage('Checkout') {
             container('jnlp') {
+                sh '/usr/bin/git config --global http.sslVerify false'
                 checkout scm
             }
         }
 
-        stage('Build & Push') {
+        stage('Hello') {
             container('docker') {
-                sh "docker build -t ${appimage} ."
-                sh "docker push ${appimage}"
+
+                echo "Building docker image..."
+
+                sh "echo docker build -t ${appimage} ."
+
+                sh "echo docker push ${appimage}"
             }
         }
     }
