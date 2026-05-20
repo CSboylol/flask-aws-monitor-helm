@@ -38,7 +38,15 @@ podTemplate(
                 sh "docker build -t ${appimage} ."
             }
         }
-
+        stage('Helm Template') {
+            container('docker') {
+                sh """
+                helm template flask-app helmchart \
+                  --set image.repository=${repo}/${appname} \
+                  --set image.tag=${apptag}
+                """
+            }
+        }
         stage('Push') {
             container('docker') {
                 withCredentials([usernamePassword(
