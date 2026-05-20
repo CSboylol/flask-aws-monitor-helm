@@ -39,10 +39,16 @@ podTemplate(
             }
         }
 
-        stage('Push Simulation') {
+        stage('Push') {
             container('docker') {
-                echo "Simulating docker push..."
-                sh "echo docker push ${appimage}"
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                    sh "docker push ${appimage}"
+                }
             }
         }
     }
