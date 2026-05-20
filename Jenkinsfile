@@ -6,17 +6,21 @@ def appimage = "docker.io/${repo}/${appname}:${apptag}"
 
 podTemplate(
     cloud: 'kubernetes',
+
     containers: [
+
         containerTemplate(
             name: 'jnlp',
             image: 'jenkins/inbound-agent:latest'
         ),
+
         containerTemplate(
             name: 'kaniko',
             image: 'gcr.io/kaniko-project/executor:debug',
             command: '/busybox/cat',
             ttyEnabled: true
         ),
+
         containerTemplate(
             name: 'helm',
             image: 'alpine/helm:3.14.4',
@@ -24,8 +28,9 @@ podTemplate(
             ttyEnabled: true
         )
     ],
+
     volumes: [
-        emptyDirVolume(mountPath: '/var/lib/docker', memory: false)
+
         configMapVolume(
             mountPath: '/kaniko/.docker/',
             configMapName: 'docker-cred'
@@ -36,37 +41,42 @@ podTemplate(
     node(POD_LABEL) {
 
         stage('Checkout') {
+
             container('jnlp') {
+
                 sh '/usr/bin/git config --global http.sslVerify false'
+
                 checkout scm
             }
         }
 
-        stage('Build') {
-            container('docker') {
-                echo "Building docker image: ${appimage}"
-                sh "docker build -t ${appimage} ."
+        stage('Build & Push With Kaniko') {
+
+            container('kaniko') {
+
+                echo "Building and pushing image with Kaniko: ${appimage}"
+
+                sh """
+                /kaniko/executor \
+                  --context=`pwd` \
+                  --dockerfile=Dockerfile \
+                  --destination=${appimage} \
+                  --cache=true
+                """
             }
         }
+
         stage('Helm Template') {
+
             container('helm') {
+
+                echo "Rendering Helm template..."
+
                 sh """
                 helm template flask-app helmchart \
                   --set image.repository=${repo}/${appname} \
                   --set image.tag=${apptag}
                 """
-            }
-        }
-        stage('Push') {
-            container('docker') {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-creds',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
-                    sh "docker push ${appimage}"
-                }
             }
         }
     }
