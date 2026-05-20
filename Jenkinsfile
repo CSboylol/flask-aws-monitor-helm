@@ -1,5 +1,5 @@
 def appname = "hello-newapp"
-def repo = "elevy99927"
+def repo = "csboylol23"
 def apptag = "${env.BUILD_NUMBER}"
 
 def appimage = "docker.io/${repo}/${appname}:${apptag}"
