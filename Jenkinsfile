@@ -45,7 +45,7 @@ podTemplate(
             }
         }
         stage('Helm Template') {
-            container('docker') {
+            container('helm') {
                 sh """
                 helm template flask-app helmchart \
                   --set image.repository=${repo}/${appname} \
