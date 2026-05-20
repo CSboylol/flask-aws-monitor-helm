@@ -26,6 +26,10 @@ podTemplate(
     ],
     volumes: [
         emptyDirVolume(mountPath: '/var/lib/docker', memory: false)
+        configMapVolume(
+            mountPath: '/kaniko/.docker/',
+            configMapName: 'docker-cred'
+        )
     ]
 ) {
 
