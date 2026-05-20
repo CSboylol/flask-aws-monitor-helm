@@ -12,10 +12,10 @@ podTemplate(
             image: 'jenkins/inbound-agent:latest'
         ),
         containerTemplate(
-            name: 'docker',
-            image: 'docker:26-dind',
-            privileged: true,
-            args: '--storage-driver=vfs'
+            name: 'kaniko',
+            image: 'gcr.io/kaniko-project/executor:debug',
+            command: '/busybox/cat',
+            ttyEnabled: true
         ),
         containerTemplate(
             name: 'helm',
