@@ -16,6 +16,12 @@ podTemplate(
             image: 'docker:26-dind',
             privileged: true,
             args: '--storage-driver=vfs'
+        ),
+        containerTemplate(
+            name: 'helm',
+            image: 'alpine/helm:3.14.4',
+            command: 'cat',
+            ttyEnabled: true
         )
     ],
     volumes: [
