@@ -10,12 +10,12 @@ spec:
 
   selector:
     matchLabels:
-      app: {{ .Release.Name }}
+      app: {{ .Release.Name }}-flask-monitor
 
   template:
     metadata:
       labels:
-        app: {{ .Release.Name }}
+        app: {{ .Release.Name }}-flask-monitor
 
     spec:
       containers:
