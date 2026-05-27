@@ -24,7 +24,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
 
           ports:
-            - containerPort: 5001
+            - containerPort: {{ .Values.service.targetPort }}
 
           env:
             - name: AWS_ACCESS_KEY_ID
