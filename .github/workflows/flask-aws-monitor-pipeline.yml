@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - ci-security-tests
   workflow_dispatch:
 
 permissions:
@@ -14,8 +15,8 @@ env:
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-  build-push-helm:
-    name: Build Push and Validate Helm
+  test:
+    name: Test Validate and Scan Source
     runs-on: ubuntu-latest
 
     steps:
@@ -25,94 +26,52 @@ jobs:
       - name: Prepare logs directory
         run: mkdir -p logs
 
-      - name: Notify GitHub push received
-        uses: rtCamp/action-slack-notify@v2
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_COLOR: "#439FE0"
-          SLACK_TITLE: "GitHub push received"
-          SLACK_MESSAGE: "Pipeline started | Event: ${{ github.event_name }} | Repository: ${{ github.repository }} | Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }}"
-
-      - name: Login to Docker Hub
-        id: docker_login
-        uses: docker/login-action@v4
-        continue-on-error: true
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          python-version: "3.12"
+          cache: pip
 
-      - name: Build Docker image
-        id: docker_build
-        if: steps.docker_login.outcome == 'success'
-        continue-on-error: true
+      - name: Install Python dependencies
         run: |
           set -o pipefail
-          docker build \
-            --tag "$IMAGE_NAME:$IMAGE_TAG" \
-            --tag "$IMAGE_NAME:latest" \
-            . 2>&1 | tee logs/docker-build.log
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt 2>&1 | tee logs/python-install.log
 
-      - name: Notify Docker build success
-        if: always() && steps.docker_build.outcome == 'success'
+      - name: Run Python unit tests
+        id: unit_tests
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee logs/unit-tests.log
+
+      - name: Notify unit tests success
+        if: success()
         uses: rtCamp/action-slack-notify@v2
         continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_COLOR: success
-          SLACK_TITLE: "Docker build succeeded"
-          SLACK_MESSAGE: "Image built successfully: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+          SLACK_TITLE: "Unit tests succeeded"
+          SLACK_MESSAGE: "Python unit tests completed successfully."
 
-      - name: Notify Docker build failure
-        if: always() && steps.docker_build.outcome != 'success'
+      - name: Notify unit tests failure
+        if: failure() && steps.unit_tests.outcome == 'failure'
         uses: rtCamp/action-slack-notify@v2
         continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_COLOR: failure
-          SLACK_TITLE: "Docker build failed"
-          SLACK_MESSAGE: "Docker build did not complete successfully. Review the GitHub Actions logs."
-
-      - name: Push Docker image
-        id: docker_push
-        if: steps.docker_build.outcome == 'success'
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          docker push "$IMAGE_NAME:$IMAGE_TAG" 2>&1 | tee logs/docker-push-sha.log
-          docker push "$IMAGE_NAME:latest" 2>&1 | tee logs/docker-push-latest.log
-
-      - name: Notify Docker push success
-        if: always() && steps.docker_push.outcome == 'success'
-        uses: rtCamp/action-slack-notify@v2
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_COLOR: success
-          SLACK_TITLE: "Docker push succeeded"
-          SLACK_MESSAGE: "Image pushed to Docker Hub: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} and latest"
-
-      - name: Notify Docker push failure
-        if: always() && steps.docker_push.outcome != 'success'
-        uses: rtCamp/action-slack-notify@v2
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_COLOR: failure
-          SLACK_TITLE: "Docker push failed"
-          SLACK_MESSAGE: "Docker push did not complete successfully. Review the GitHub Actions logs."
+          SLACK_TITLE: "Unit tests failed"
+          SLACK_MESSAGE: "Python unit tests failed. Review the GitHub Actions logs."
 
       - name: Install Helm
         id: helm_setup
         uses: azure/setup-helm@v5.0.0
-        continue-on-error: true
         with:
           version: latest
 
       - name: Validate Helm chart
         id: helm_template
-        if: steps.helm_setup.outcome == 'success'
-        continue-on-error: true
         run: |
           set -o pipefail
           helm lint ./helmchart 2>&1 | tee logs/helm-lint.log
@@ -122,7 +81,7 @@ jobs:
             2>&1 | tee logs/helm-template-rendered.yaml
 
       - name: Notify Helm template success
-        if: always() && steps.helm_template.outcome == 'success'
+        if: success()
         uses: rtCamp/action-slack-notify@v2
         continue-on-error: true
         env:
@@ -132,69 +91,285 @@ jobs:
           SLACK_MESSAGE: "Helm lint and template rendering completed successfully."
 
       - name: Notify Helm template failure
-        if: always() && steps.helm_template.outcome != 'success'
+        if: failure() && steps.helm_template.outcome == 'failure'
         uses: rtCamp/action-slack-notify@v2
         continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_COLOR: failure
           SLACK_TITLE: "Helm template failed"
-          SLACK_MESSAGE: "Helm validation did not complete successfully. Review the GitHub Actions logs."
+          SLACK_MESSAGE: "Helm validation failed. Review the GitHub Actions logs."
 
+      - name: Scan repository with Trivy
+        id: trivy_fs
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          output: logs/trivy-filesystem.log
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Notify source security scan success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Source security scan succeeded"
+          SLACK_MESSAGE: "Trivy filesystem scan completed without blocking CRITICAL vulnerabilities."
+
+      - name: Notify source security scan failure
+        if: failure() && steps.trivy_fs.outcome == 'failure'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Source security scan failed"
+          SLACK_MESSAGE: "Trivy detected a blocking CRITICAL vulnerability in the repository."
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-logs-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: warn
+          retention-days: 7
+
+  build-and-push:
+    name: Build Smoke Test Scan and Push
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare logs directory
+        run: mkdir -p logs
+
+      - name: Notify Docker build started
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: "#439FE0"
+          SLACK_TITLE: "Docker build started"
+          SLACK_MESSAGE: "Repository: ${{ github.repository }} | Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }}"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image
+        id: docker_build
+        run: |
+          set -o pipefail
+          docker build \
+            --tag "$IMAGE_NAME:$IMAGE_TAG" \
+            --tag "$IMAGE_NAME:latest" \
+            . 2>&1 | tee logs/docker-build.log
+
+      - name: Notify Docker build success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Docker build succeeded"
+          SLACK_MESSAGE: "Image built successfully: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+
+      - name: Notify Docker build failure
+        if: failure() && steps.docker_build.outcome == 'failure'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Docker build failed"
+          SLACK_MESSAGE: "Docker image build failed. Review the GitHub Actions logs."
+
+      - name: Run container smoke test
+        id: smoke_test
+        run: |
+          set -o pipefail
+
+          docker run -d \
+            --name flask-aws-monitor-smoke \
+            -p 5001:5001 \
+            "$IMAGE_NAME:$IMAGE_TAG"
+
+          trap 'docker logs flask-aws-monitor-smoke > logs/container.log 2>&1 || true; docker rm -f flask-aws-monitor-smoke >/dev/null 2>&1 || true' EXIT
+
+          for attempt in {1..15}; do
+            if curl --fail --silent --show-error http://127.0.0.1:5001/ > logs/smoke-response.html; then
+              echo "Smoke test passed." | tee logs/smoke-test.log
+              exit 0
+            fi
+
+            echo "Waiting for container startup. Attempt: $attempt" | tee -a logs/smoke-test.log
+            sleep 2
+          done
+
+          echo "Smoke test failed." | tee -a logs/smoke-test.log
+          exit 1
+
+      - name: Notify smoke test success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Container smoke test succeeded"
+          SLACK_MESSAGE: "The temporary Flask container responded successfully on port 5001."
+
+      - name: Notify smoke test failure
+        if: failure() && steps.smoke_test.outcome == 'failure'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Container smoke test failed"
+          SLACK_MESSAGE: "The Flask container did not respond successfully. Review the logs."
+
+      - name: Scan Docker image with Trivy
+        id: trivy_image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: table
+          output: logs/trivy-image.log
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Notify image security scan success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Docker image security scan succeeded"
+          SLACK_MESSAGE: "Trivy image scan completed without blocking CRITICAL vulnerabilities."
+
+      - name: Notify image security scan failure
+        if: failure() && steps.trivy_image.outcome == 'failure'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Docker image security scan failed"
+          SLACK_MESSAGE: "Trivy detected a blocking CRITICAL vulnerability in the Docker image."
+
+      - name: Push Docker image
+        id: docker_push
+        run: |
+          set -o pipefail
+
+          docker push "$IMAGE_NAME:$IMAGE_TAG" 2>&1 | tee logs/docker-push-sha.log
+
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            docker push "$IMAGE_NAME:latest" 2>&1 | tee logs/docker-push-latest.log
+          else
+            echo "Skipping latest tag push outside the main branch." | tee logs/docker-push-latest.log
+          fi
+
+      - name: Notify Docker push success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Docker push succeeded"
+          SLACK_MESSAGE: "Docker image pushed successfully: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+
+      - name: Notify Docker push failure
+        if: failure() && steps.docker_push.outcome == 'failure'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Docker push failed"
+          SLACK_MESSAGE: "Docker image push failed. Review the GitHub Actions logs."
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-logs-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: warn
+          retention-days: 7
+
+  notify:
+    name: Notify Pipeline Summary
+    needs:
+      - test
+      - build-and-push
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
       - name: Determine final pipeline result
         id: pipeline_result
-        if: always()
         run: |
-          if [[ "${{ steps.docker_login.outcome }}" == "success" \
-             && "${{ steps.docker_build.outcome }}" == "success" \
-             && "${{ steps.docker_push.outcome }}" == "success" \
-             && "${{ steps.helm_setup.outcome }}" == "success" \
-             && "${{ steps.helm_template.outcome }}" == "success" ]]; then
+          if [[ "${{ needs.test.result }}" == "success" && \
+                "${{ needs.build-and-push.result }}" == "success" ]]; then
             echo "status=success" >> "$GITHUB_OUTPUT"
           else
             echo "status=failure" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create pipeline summary
-        if: always()
         run: |
+          mkdir -p logs
+
           {
             echo "# Flask AWS Monitor Pipeline Summary"
             echo ""
-            echo "| Stage | Result |"
+            echo "| Job | Result |"
             echo "| --- | --- |"
-            echo "| Docker Hub login | ${{ steps.docker_login.outcome }} |"
-            echo "| Docker build | ${{ steps.docker_build.outcome }} |"
-            echo "| Docker push | ${{ steps.docker_push.outcome }} |"
-            echo "| Helm setup | ${{ steps.helm_setup.outcome }} |"
-            echo "| Helm template | ${{ steps.helm_template.outcome }} |"
+            echo "| Test Validate and Scan Source | ${{ needs.test.result }} |"
+            echo "| Build Smoke Test Scan and Push | ${{ needs.build-and-push.result }} |"
             echo "| Final status | ${{ steps.pipeline_result.outputs.status }} |"
             echo ""
-            echo "Image SHA tag: $IMAGE_NAME:$IMAGE_TAG"
-            echo "Image latest tag: $IMAGE_NAME:latest"
+            echo "Image SHA tag: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
           } | tee logs/pipeline-summary.md | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload pipeline logs
-        if: always()
+      - name: Upload pipeline summary
         uses: actions/upload-artifact@v7
         with:
-          name: pipeline-logs-${{ github.run_id }}
+          name: pipeline-summary-${{ github.run_id }}
           path: logs/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
 
       - name: Notify pipeline summary
-        if: always()
         uses: rtCamp/action-slack-notify@v2
         continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_COLOR: ${{ steps.pipeline_result.outputs.status }}
           SLACK_TITLE: "Pipeline summary: ${{ steps.pipeline_result.outputs.status }}"
-          SLACK_MESSAGE: "Repository: ${{ github.repository }} | Docker build: ${{ steps.docker_build.outcome }} | Docker push: ${{ steps.docker_push.outcome }} | Helm template: ${{ steps.helm_template.outcome }}"
+          SLACK_MESSAGE: "Repository: ${{ github.repository }} | Test job: ${{ needs.test.result }} | Build and push job: ${{ needs.build-and-push.result }}"
 
-      - name: Fail workflow if required stage failed
-        if: always() && steps.pipeline_result.outputs.status == 'failure'
+      - name: Fail workflow if a required job failed
+        if: steps.pipeline_result.outputs.status == 'failure'
         run: |
-          echo "One or more required pipeline stages failed."
+          echo "One or more required jobs failed."
           exit 1
