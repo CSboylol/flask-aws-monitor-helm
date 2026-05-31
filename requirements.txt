@@ -1,2 +1,3 @@
 flask
 boto3
+Werkzeug==2.3.8
