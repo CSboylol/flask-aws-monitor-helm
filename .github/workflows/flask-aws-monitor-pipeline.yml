@@ -1,0 +1,200 @@
+name: Flask AWS Monitor Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: csboylol23/flask-aws-monitor
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-push-helm:
+    name: Build Push and Validate Helm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare logs directory
+        run: mkdir -p logs
+
+      - name: Notify GitHub push received
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: "#439FE0"
+          SLACK_TITLE: "GitHub push received"
+          SLACK_MESSAGE: "Pipeline started | Event: ${{ github.event_name }} | Repository: ${{ github.repository }} | Branch: ${{ github.ref_name }} | Commit: ${{ github.sha }}"
+
+      - name: Login to Docker Hub
+        id: docker_login
+        uses: docker/login-action@v4
+        continue-on-error: true
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image
+        id: docker_build
+        if: steps.docker_login.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          docker build \
+            --tag "$IMAGE_NAME:$IMAGE_TAG" \
+            --tag "$IMAGE_NAME:latest" \
+            . 2>&1 | tee logs/docker-build.log
+
+      - name: Notify Docker build success
+        if: always() && steps.docker_build.outcome == 'success'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Docker build succeeded"
+          SLACK_MESSAGE: "Image built successfully: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+
+      - name: Notify Docker build failure
+        if: always() && steps.docker_build.outcome != 'success'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Docker build failed"
+          SLACK_MESSAGE: "Docker build did not complete successfully. Review the GitHub Actions logs."
+
+      - name: Push Docker image
+        id: docker_push
+        if: steps.docker_build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          docker push "$IMAGE_NAME:$IMAGE_TAG" 2>&1 | tee logs/docker-push-sha.log
+          docker push "$IMAGE_NAME:latest" 2>&1 | tee logs/docker-push-latest.log
+
+      - name: Notify Docker push success
+        if: always() && steps.docker_push.outcome == 'success'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Docker push succeeded"
+          SLACK_MESSAGE: "Image pushed to Docker Hub: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} and latest"
+
+      - name: Notify Docker push failure
+        if: always() && steps.docker_push.outcome != 'success'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Docker push failed"
+          SLACK_MESSAGE: "Docker push did not complete successfully. Review the GitHub Actions logs."
+
+      - name: Install Helm
+        id: helm_setup
+        uses: azure/setup-helm@v5.0.0
+        continue-on-error: true
+        with:
+          version: latest
+
+      - name: Validate Helm chart
+        id: helm_template
+        if: steps.helm_setup.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          helm lint ./helmchart 2>&1 | tee logs/helm-lint.log
+          helm template flask-monitor ./helmchart \
+            --set image.repository="$IMAGE_NAME" \
+            --set image.tag="$IMAGE_TAG" \
+            2>&1 | tee logs/helm-template-rendered.yaml
+
+      - name: Notify Helm template success
+        if: always() && steps.helm_template.outcome == 'success'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: success
+          SLACK_TITLE: "Helm template succeeded"
+          SLACK_MESSAGE: "Helm lint and template rendering completed successfully."
+
+      - name: Notify Helm template failure
+        if: always() && steps.helm_template.outcome != 'success'
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: failure
+          SLACK_TITLE: "Helm template failed"
+          SLACK_MESSAGE: "Helm validation did not complete successfully. Review the GitHub Actions logs."
+
+      - name: Determine final pipeline result
+        id: pipeline_result
+        if: always()
+        run: |
+          if [[ "${{ steps.docker_login.outcome }}" == "success" \
+             && "${{ steps.docker_build.outcome }}" == "success" \
+             && "${{ steps.docker_push.outcome }}" == "success" \
+             && "${{ steps.helm_setup.outcome }}" == "success" \
+             && "${{ steps.helm_template.outcome }}" == "success" ]]; then
+            echo "status=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pipeline summary
+        if: always()
+        run: |
+          {
+            echo "# Flask AWS Monitor Pipeline Summary"
+            echo ""
+            echo "| Stage | Result |"
+            echo "| --- | --- |"
+            echo "| Docker Hub login | ${{ steps.docker_login.outcome }} |"
+            echo "| Docker build | ${{ steps.docker_build.outcome }} |"
+            echo "| Docker push | ${{ steps.docker_push.outcome }} |"
+            echo "| Helm setup | ${{ steps.helm_setup.outcome }} |"
+            echo "| Helm template | ${{ steps.helm_template.outcome }} |"
+            echo "| Final status | ${{ steps.pipeline_result.outputs.status }} |"
+            echo ""
+            echo "Image SHA tag: $IMAGE_NAME:$IMAGE_TAG"
+            echo "Image latest tag: $IMAGE_NAME:latest"
+          } | tee logs/pipeline-summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload pipeline logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pipeline-logs-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Notify pipeline summary
+        if: always()
+        uses: rtCamp/action-slack-notify@v2
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: ${{ steps.pipeline_result.outputs.status }}
+          SLACK_TITLE: "Pipeline summary: ${{ steps.pipeline_result.outputs.status }}"
+          SLACK_MESSAGE: "Repository: ${{ github.repository }} | Docker build: ${{ steps.docker_build.outcome }} | Docker push: ${{ steps.docker_push.outcome }} | Helm template: ${{ steps.helm_template.outcome }}"
+
+      - name: Fail workflow if required stage failed
+        if: always() && steps.pipeline_result.outputs.status == 'failure'
+        run: |
+          echo "One or more required pipeline stages failed."
+          exit 1
