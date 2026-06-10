@@ -10,8 +10,8 @@ aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION") or None
 
 # Initialize Boto3 clients with try/except
-ec2_client=None
-elb_client=None
+ec2_client = None
+elb_client = None
 
 if AWS_DEFAULT_REGION:
     try:
@@ -46,7 +46,7 @@ def home():
                         if tag.get("Key") == "Name":
                             name = tag.get("Value")
                             break
-                
+
                     instance_data.append({
                         "Name": name,
                         "ID": instance["InstanceId"],
@@ -60,21 +60,24 @@ def home():
         # Fetch VPCs
         try:
             vpcs = ec2_client.describe_vpcs()
-            vpc_data = [{"VPC ID": vpc["VpcId"], "CIDR": vpc["CidrBlock"]} for vpc in vpcs["Vpcs"]]
+            vpc_data = [{"VPC ID": vpc["VpcId"], "CIDR": vpc["CidrBlock"]}
+                        for vpc in vpcs["Vpcs"]]
         except Exception as e:
             print(f"Error fetching VPCs: {e}")
-            
+
         # Fetch subnets
         try:
             subnets = ec2_client.describe_subnets()
-            subnet_data = [{"Subnet ID": subnet["SubnetId"],"VPC ID": subnet["VpcId"],"CIDR": subnet["CidrBlock"],"Availability Zone": subnet["AvailabilityZone"]} for subnet in subnets["Subnets"]]
+            subnet_data = [{"Subnet ID": subnet["SubnetId"], "VPC ID": subnet["VpcId"], "CIDR": subnet["CidrBlock"],
+                            "Availability Zone": subnet["AvailabilityZone"]} for subnet in subnets["Subnets"]]
         except Exception as e:
             print(f"Error fetching Subnets: {e}")
-            
+
         # Fetch AMIs
         try:
             amis = ec2_client.describe_images(Owners=['self'])
-            ami_data = [{"AMI ID": ami["ImageId"], "Name": ami.get("Name", "N/A")} for ami in amis["Images"]]
+            ami_data = [{"AMI ID": ami["ImageId"], "Name": ami.get(
+                "Name", "N/A")} for ami in amis["Images"]]
         except Exception as e:
             print(f"Error fetching AMIs: {e}")
 
@@ -82,7 +85,8 @@ def home():
     if elb_client:
         try:
             lbs = elb_client.describe_load_balancers()
-            lb_data = [{"LB Name": lb["LoadBalancerName"], "DNS Name": lb["DNSName"]} for lb in lbs["LoadBalancers"]]
+            lb_data = [{"LB Name": lb["LoadBalancerName"],
+                        "DNS Name": lb["DNSName"]} for lb in lbs["LoadBalancers"]]
         except Exception as e:
             print(f"Error fetching Load Balancers: {e}")
 
@@ -292,13 +296,14 @@ def home():
     </html>
     """
 
-    return render_template_string(html_template, 
-                                  instance_data=instance_data, 
+    return render_template_string(html_template,
+                                  instance_data=instance_data,
                                   vpc_data=vpc_data,
-                                  subnet_data=subnet_data, 
-                                  lb_data=lb_data, 
+                                  subnet_data=subnet_data,
+                                  lb_data=lb_data,
                                   ami_data=ami_data
                                   )
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=False)  # nosec B104
