@@ -85,3 +85,18 @@ The application has passed:
 - Unit tests
 - Helm lint
 - Helm template rendering
+
+## Jenkins Local Validation
+
+The Jenkins pipeline was executed successfully in a local Docker-based Jenkins environment.
+
+Validated stages:
+
+- Git checkout from the dev branch
+- Python lint with flake8
+- Python security scan with bandit
+- Unit tests with pytest
+- Docker image build
+- Trivy container image scan
+- Docker Hub push
+- Helm lint and template rendering
