@@ -1,35 +1,102 @@
-Flask AWS Monitor - Helm Deployment
+# Flask AWS Monitor
 
-This project packages a Flask-based AWS monitoring application and deploys it to Kubernetes using Helm.
+## Overview
+This repository contains a Flask application that displays AWS resources from the configured AWS account.
 
-Overview
-The application connects to AWS using environment variables and displays resources such as EC2 instances, VPCs, subnets, AMIs, and load balancers.
-The Helm chart allows flexible deployment by controlling configuration through values.yaml, without modifying the Kubernetes manifests directly.
+The application lists:
 
-Deployment
-Install the chart:
-helm install flask-monitor.
+- EC2 instances
+- VPCs
+- Subnets
+- Load Balancers
+- AMIs owned by the account
 
-Verify the deployment:
-kubectl get pods
-kubectl get svc
+## Repository Contents
 
-Accessing the Application
-Local (ClusterIP)
-By default, the service is configured as ClusterIP, which is suitable for local environments.
+- app.py - Flask application
+- requirements.txt - Python dependencies
+- Dockerfile - Container image definition
+- Jenkinsfile - CI/CD pipeline
+- helmchart - Helm chart for Kubernetes deployment
+- tests - Unit tests
 
-Forward the port:
-kubectl port-forward svc/flask-monitor-service 5001:5001
-Access in browser:
+## Local Run
+
+Install dependencies:
+
+pip install -r requirements.txt
+
+Run the application:
+
+python app.py
+
+Open:
+
 http://localhost:5001
 
-External Access (LoadBalancer)
-To expose the application externally:
-helm upgrade flask-monitor . --set service.type=LoadBalancer
-Then check:
-kubectl get svc
+## Docker
 
-Once an external IP is available:
-http://<external-ip>:5001
-Configuration
-Configuration is managed through values.yaml.
+Build the image:
+
+docker build -t flask-aws-monitor:local .
+
+Run the container:
+
+docker run --rm -p 5001:5001 flask-aws-monitor:local
+
+## AWS Environment Variables
+
+- AWS_ACCESS_KEY_ID
+- AWS_SECRET_ACCESS_KEY
+- AWS_DEFAULT_REGION
+
+Do not commit real AWS credentials.
+
+## Tests
+
+python -m pytest
+
+## Helm Validation
+
+helm lint ./helmchart
+
+helm template flask-monitor ./helmchart
+
+## Jenkins Pipeline
+
+The Jenkins pipeline performs:
+
+- Repository checkout
+- Python linting
+- Python security scanning
+- Unit tests
+- Docker image build
+- Trivy container scan
+- Docker Hub push
+- Helm validation
+
+## Current Validation Status
+
+The application has passed:
+
+- Docker build
+- Local container run
+- HTTP 200 response check
+- Unit tests
+- Helm lint
+- Helm template rendering
+
+## Jenkins Local Validation
+
+The Jenkins pipeline was executed successfully in a local Docker-based Jenkins environment.
+
+Validated stages:
+
+- Git checkout from the dev branch
+- Python lint with flake8
+- Python security scan with bandit
+- Unit tests with pytest
+- Docker image build
+- Trivy container image scan
+- Docker Hub push
+- Helm lint and template rendering
