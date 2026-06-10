@@ -3,11 +3,11 @@ kind: Service
 metadata:
   name: {{ .Release.Name }}-service
   labels:
-    app: {{ .Release.Name }}
+    app: {{ .Release.Name }}-flask-monitor
 spec:
   type: {{ .Values.service.type }}
   selector:
-    app: {{ .Release.Name }}
+    app: {{ .Release.Name }}-flask-monitor
   ports:
     - name: http
       protocol: TCP
