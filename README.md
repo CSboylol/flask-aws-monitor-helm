@@ -100,3 +100,29 @@ Validated stages:
 - Trivy container image scan
 - Docker Hub push
 - Helm lint and template rendering
+
+## Final Project Notes
+
+This repo contains the main Flask application for the DevOps final project.
+It includes the application code, Dockerfile, Jenkins pipeline, unit test, and Helm chart.
+
+The basic flow I used is:
+
+`	ext
+GitHub -> Jenkins -> Tests -> Docker Build -> Docker Hub -> Helm validation
+`"
+"
+
+
+`powershell
+python -m pytest
+docker build -t flask-aws-monitor:demo .
+docker run --rm -d --name flask-demo -p 5001:5001 flask-aws-monitor:demo
+Invoke-WebRequest http://localhost:5001 -UseBasicParsing
+docker stop flask-demo
+`"
+"
+
+
+The Jenkins pipeline was tested locally with Jenkins running in Docker.
+It runs lint, security scan, unit tests, Docker build, Trivy scan, Docker Hub push, and Helm validation.
