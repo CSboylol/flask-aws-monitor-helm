@@ -4,6 +4,13 @@ pipeline {
     options {
         skipDefaultCheckout(true)
     }
+    parameters {
+        choice(
+            name: 'TARGET_ENV',
+            choices: ['dev', 'qa', 'prd'],
+            description: 'Environment to update in the GitOps repository'
+        )
+    }
 
     environment {
         IMAGE_REPO = 'csboylol23/flask-aws-monitor'
@@ -127,6 +134,55 @@ pipeline {
                 '''
             }
         }
+
+        stage('Push to ArgoCD') {
+            steps {
+                script {
+                    def selectedEnv = params.TARGET_ENV
+
+                    echo "Deploying build ${BUILD_NUMBER} to ${selectedEnv}"
+
+                    withCredentials([usernamePassword(
+                        credentialsId: 'github-argoCD',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh '''
+                            docker run --rm \
+                              -v ${WORKSPACE_VOLUME}:/workspace \
+                              -w /workspace \
+                              alpine/helm:3.14.4 \
+                              template flask-aws-monitor helmchart \
+                              --set image.repository=${IMAGE_REPO} \
+                              --set image.tag=${IMAGE_TAG} \
+                              > devops-template.yaml
+
+                            rm -rf gitops-deploy
+                            git clone https://github.com/CSboylol/gitops.git gitops-deploy
+
+                            mkdir -p gitops-deploy/deployments/${TARGET_ENV}
+                            cp devops-template.yaml \
+                              gitops-deploy/deployments/${TARGET_ENV}/devops-template.yaml
+
+                            cd gitops-deploy
+
+                            git config user.name "Jenkins Bot"
+                            git config user.email "jenkins-bot@example.com"
+
+                            git add deployments/${TARGET_ENV}/devops-template.yaml
+
+                            git commit \
+                              -m "Deploy build ${BUILD_NUMBER} to ${TARGET_ENV}" || \
+                              echo "No GitOps changes to commit"
+
+                            git push \
+                              https://x-access-token:${GIT_TOKEN}@github.com/CSboylol/gitops.git \
+                              HEAD:main
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     post {
@@ -146,3 +202,9 @@ pipeline {
         }
     }
 }
+
+
+
+
+
+
