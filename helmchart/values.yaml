@@ -1,4 +1,4 @@
-replicaCount: 4
+replicaCount: 3
 
 image:
   repository: csboylol23/flask-aws-monitor
@@ -26,3 +26,4 @@ resources:
 ingress:
   enabled: false
   host: flask.local
+
