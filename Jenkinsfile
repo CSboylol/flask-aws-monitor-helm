@@ -3,6 +3,7 @@ pipeline {
 
     options {
         skipDefaultCheckout(true)
+        disableConcurrentBuilds()
     }
     parameters {
         choice(
@@ -202,6 +203,9 @@ pipeline {
         }
     }
 }
+
+
+
 
 
 
